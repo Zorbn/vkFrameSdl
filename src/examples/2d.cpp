@@ -1,14 +1,14 @@
 #include "../vkFrame/renderer.hpp"
 
 /*
- * Update:
- * Make a model that swaps between 2 meshes and has 3 instances.
+ * 2d:
+ * Render 2d sprites.
  */
 
 struct VertexData {
-    glm::vec3 pos;
-    glm::vec3 color;
-    glm::vec2 texCoord;
+    alignas(16) glm::vec3 pos;
+    alignas(16) glm::vec3 color;
+    alignas(8) glm::vec2 texCoord;
 
     static VkVertexInputBindingDescription getBindingDescription() {
         VkVertexInputBindingDescription bindingDescription{};
@@ -43,7 +43,9 @@ struct VertexData {
 
 struct InstanceData {
 public:
-    glm::vec3 pos;
+    alignas(16) glm::vec3 pos;
+    alignas(8) glm::vec2 size;
+    float texIndex;
 
     static VkVertexInputBindingDescription getBindingDescription() {
         VkVertexInputBindingDescription bindingDescription{};
@@ -56,12 +58,22 @@ public:
 
     static std::vector<VkVertexInputAttributeDescription> getAttributeDescriptions() {
         std::vector<VkVertexInputAttributeDescription> attributeDescriptions{};
-        attributeDescriptions.resize(1);
+        attributeDescriptions.resize(3);
 
         attributeDescriptions[0].binding = 1;
         attributeDescriptions[0].location = 3;
         attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[0].offset = 0;
+        attributeDescriptions[0].offset = offsetof(InstanceData, pos);
+
+        attributeDescriptions[1].binding = 1;
+        attributeDescriptions[1].location = 4;
+        attributeDescriptions[1].format = VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[1].offset = offsetof(InstanceData, size);
+
+        attributeDescriptions[2].binding = 1;
+        attributeDescriptions[2].location = 5;
+        attributeDescriptions[2].format = VK_FORMAT_R32_SFLOAT;
+        attributeDescriptions[2].offset = offsetof(InstanceData, texIndex);
 
         return attributeDescriptions;
     }
@@ -73,25 +85,14 @@ struct UniformBufferData {
     alignas(16) glm::mat4 proj;
 };
 
-const std::vector<VertexData> testVertices = {
-    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-    {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+const std::vector<VertexData> spriteVertices = {
+    {{0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
+    {{1.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
+    {{1.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
+    {{0.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+};
 
-    {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-    {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}};
-
-const std::vector<uint16_t> testIndices = {0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4};
-
-const std::vector<VertexData> testVertices2 = {
-    {{0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-    {{1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}}};
-
-const std::vector<uint16_t> testIndices2 = {0, 1, 2};
+const std::vector<uint16_t> spriteIndices = {0, 2, 1, 0, 3, 2};
 
 class App {
 private:
@@ -105,8 +106,6 @@ private:
     UniformBuffer<UniformBufferData> ubo;
     Model<VertexData, uint16_t, InstanceData> spriteModel;
 
-    uint32_t frameCount = 0;
-
     std::vector<VkClearValue> clearValues;
 
 public:
@@ -118,19 +117,20 @@ public:
                                         vulkanState.surface);
         vulkanState.commands.createBuffers(vulkanState.device, vulkanState.maxFramesInFlight);
 
-        textureImage =
-            Image::createTexture("res/updateImg.png", vulkanState.allocator, vulkanState.commands,
-                                 vulkanState.graphicsQueue, vulkanState.device, true);
+        textureImage = Image::createTextureArray("res/cubesImg.png", vulkanState.allocator,
+                                                 vulkanState.commands, vulkanState.graphicsQueue,
+                                                 vulkanState.device, false, 16, 16, 4);
         textureImageView = textureImage.createTextureView(vulkanState.device);
-        textureSampler =
-            textureImage.createTextureSampler(vulkanState.physicalDevice, vulkanState.device);
+        textureSampler = textureImage.createTextureSampler(
+            vulkanState.physicalDevice, vulkanState.device, VK_FILTER_NEAREST, VK_FILTER_NEAREST);
 
-        spriteModel = Model<VertexData, uint16_t, InstanceData>::create(
-            3, vulkanState.allocator, vulkanState.commands, vulkanState.graphicsQueue,
-            vulkanState.device);
-        std::vector<InstanceData> instances = {InstanceData{glm::vec3(1.0f, 0.0f, 0.0f)},
-                                               InstanceData{glm::vec3(0.0f, 1.0f, 0.0f)},
-                                               InstanceData{glm::vec3(0.0f, 0.0f, 1.0f)}};
+        spriteModel = Model<VertexData, uint16_t, InstanceData>::fromVerticesAndIndices(
+            spriteVertices, spriteIndices, 3, vulkanState.allocator, vulkanState.commands,
+            vulkanState.graphicsQueue, vulkanState.device);
+        std::vector<InstanceData> instances = {
+            InstanceData{glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(32.0f, 32.0f), 0.0},
+            InstanceData{glm::vec3(32.0f, 0.0f, 0.0f), glm::vec2(32.0f, 32.0f), 1.0},
+            InstanceData{glm::vec3(32.0f, 32.0f, 0.0f), glm::vec2(32.0f, 32.0f), 2.0}};
         spriteModel.updateInstances(instances, vulkanState.commands, vulkanState.allocator,
                                     vulkanState.graphicsQueue, vulkanState.device);
 
@@ -203,31 +203,15 @@ public:
                                        static_cast<uint32_t>(descriptorWrites.size()),
                                        descriptorWrites.data(), 0, nullptr);
             });
-        pipeline.create<VertexData, InstanceData>("res/updateShader.vert.spv",
-                                                  "res/updateShader.frag.spv", vulkanState.device,
-                                                  renderPass, false);
+        pipeline.create<VertexData, InstanceData>("res/2dShader.vert.spv", "res/2dShader.frag.spv",
+                                                  vulkanState.device, renderPass, false);
 
         clearValues.resize(2);
         clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
         clearValues[1].depthStencil = {1.0f, 0};
     }
 
-    void update(VulkanState& vulkanState) {
-        uint32_t animFrame = frameCount / 3000;
-        if (frameCount % 3000 == 0) {
-            if (animFrame % 2 == 0) {
-                spriteModel.update(testVertices2, testIndices2, vulkanState.commands,
-                                   vulkanState.allocator, vulkanState.graphicsQueue,
-                                   vulkanState.device);
-            } else {
-                spriteModel.update(testVertices, testIndices, vulkanState.commands,
-                                   vulkanState.allocator, vulkanState.graphicsQueue,
-                                   vulkanState.device);
-            }
-        }
-
-        frameCount++;
-    }
+    void update(VulkanState& vulkanState) {}
 
     void render(VulkanState& vulkanState, VkCommandBuffer commandBuffer, uint32_t imageIndex,
                 uint32_t currentFrame) {
@@ -240,13 +224,11 @@ public:
                 .count();
 
         UniformBufferData uboData{};
-        uboData.model =
-            glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        uboData.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
-                                   glm::vec3(0.0f, 0.0f, 1.0f));
-        uboData.proj =
-            glm::perspective(glm::radians(45.0f), extent.width / (float)extent.height, 0.1f, 10.0f);
-        uboData.proj[1][1] *= -1;
+        uboData.model = glm::mat4(1.0f);
+        uboData.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
+                                   glm::vec3(0.0f, 1.0f, 0.0f));
+        uboData.proj = glm::ortho(0.0f, static_cast<float>(extent.width), 0.0f,
+                                  static_cast<float>(extent.height), 0.1f, 10.0f);
 
         ubo.update(uboData);
 
@@ -308,7 +290,7 @@ public:
         };
 
         try {
-            renderer.run("Update", 640, 480, 2, initCallback, updateCallback, renderCallback,
+            renderer.run("2d", 640, 480, 2, initCallback, updateCallback, renderCallback,
                          resizeCallback, cleanupCallback);
         } catch (const std::exception& e) {
             std::cerr << e.what() << std::endl;

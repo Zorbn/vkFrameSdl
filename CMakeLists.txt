@@ -45,7 +45,7 @@ target_link_libraries(
 
 # Examples
 
-set(ExampleNames UpdateExample CubesExample RenderTextureExample)
+set(ExampleNames UpdateExample CubesExample RenderTextureExample 2dExample)
 
 add_executable(UpdateExample src/examples/update.cpp)
 target_link_libraries(UpdateExample ${LIB_NAME})
@@ -55,6 +55,9 @@ target_link_libraries(CubesExample ${LIB_NAME})
 
 add_executable(RenderTextureExample src/examples/renderTexture.cpp)
 target_link_libraries(RenderTextureExample ${LIB_NAME})
+
+add_executable(2dExample src/examples/2d.cpp)
+target_link_libraries(2dExample ${LIB_NAME})
 
 foreach(EXAMPLE IN LISTS ExampleNames)
         add_custom_command(

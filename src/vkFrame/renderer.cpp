@@ -60,11 +60,9 @@ void Renderer::initWindow(const std::string& windowTitle, const uint32_t windowW
         throw std::runtime_error("Unable to initialize Vulkan!");
     }
 
-    window = SDL_CreateWindow(windowTitle.c_str(),
-                                   SDL_WINDOWPOS_CENTERED,
-                                   SDL_WINDOWPOS_CENTERED,
-                                   windowWidth, windowHeight,
-                                   SDL_WINDOW_VULKAN | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+    window = SDL_CreateWindow(windowTitle.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                              windowWidth, windowHeight,
+                              SDL_WINDOW_VULKAN | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
 }
 
 void Renderer::initVulkan(
@@ -485,13 +483,11 @@ bool Renderer::checkDeviceExtensionSupport(VkPhysicalDevice device) {
 std::vector<const char*> Renderer::getRequiredExtensions() {
     uint32_t extensionCount = 0;
     std::vector<const char*> extensions;
-    if (!SDL_Vulkan_GetInstanceExtensions(window, &extensionCount, nullptr))
-    {
+    if (!SDL_Vulkan_GetInstanceExtensions(window, &extensionCount, nullptr)) {
         throw std::runtime_error("Unable to get Vulkan extensions!");
     }
     extensions.resize(extensionCount);
-    if (!SDL_Vulkan_GetInstanceExtensions(window, &extensionCount, &extensions[0]))
-    {
+    if (!SDL_Vulkan_GetInstanceExtensions(window, &extensionCount, &extensions[0])) {
         throw std::runtime_error("Unable to get Vulkan extensions!");
     }
 
