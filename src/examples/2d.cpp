@@ -6,9 +6,9 @@
  */
 
 struct VertexData {
-    alignas(16) glm::vec3 pos;
-    alignas(16) glm::vec3 color;
-    alignas(8) glm::vec2 texCoord;
+    glm::vec3 pos;
+    glm::vec3 color;
+    glm::vec2 texCoord;
 
     static VkVertexInputBindingDescription getBindingDescription() {
         VkVertexInputBindingDescription bindingDescription{};
@@ -43,9 +43,10 @@ struct VertexData {
 
 struct InstanceData {
 public:
-    alignas(16) glm::vec3 pos;
-    alignas(8) glm::vec2 size;
-    float texIndex;
+    glm::vec3 pos;
+    glm::vec2 size;
+    glm::vec2 texPos;
+    glm::vec2 texSize;
 
     static VkVertexInputBindingDescription getBindingDescription() {
         VkVertexInputBindingDescription bindingDescription{};
@@ -58,7 +59,7 @@ public:
 
     static std::vector<VkVertexInputAttributeDescription> getAttributeDescriptions() {
         std::vector<VkVertexInputAttributeDescription> attributeDescriptions{};
-        attributeDescriptions.resize(3);
+        attributeDescriptions.resize(4);
 
         attributeDescriptions[0].binding = 1;
         attributeDescriptions[0].location = 3;
@@ -72,8 +73,13 @@ public:
 
         attributeDescriptions[2].binding = 1;
         attributeDescriptions[2].location = 5;
-        attributeDescriptions[2].format = VK_FORMAT_R32_SFLOAT;
-        attributeDescriptions[2].offset = offsetof(InstanceData, texIndex);
+        attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[2].offset = offsetof(InstanceData, texPos);
+
+        attributeDescriptions[3].binding = 1;
+        attributeDescriptions[3].location = 6;
+        attributeDescriptions[3].format = VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[3].offset = offsetof(InstanceData, texSize);
 
         return attributeDescriptions;
     }
@@ -86,27 +92,87 @@ struct UniformBufferData {
 };
 
 const std::vector<VertexData> spriteVertices = {
-    {{0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
-    {{1.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
-    {{1.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
-    {{0.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+    {{0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
+    {{1.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
+    {{1.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+    {{0.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
 };
 
 const std::vector<uint16_t> spriteIndices = {0, 2, 1, 0, 3, 2};
+
+class SpriteBatch {
+private:
+    Model<VertexData, uint16_t, InstanceData> spriteModel;
+    std::vector<InstanceData> instances;
+    Image textureImage;
+    VkImageView textureImageView;
+    VkSampler textureSampler;
+    size_t maxSprites = 0;
+    float inverseImageWidth = 0.0f;
+    float inverseImageHeight = 0.0f;
+
+public:
+    void init(VulkanState& vulkanState, const std::string &image, size_t maxSprites) {
+        this->maxSprites = maxSprites;
+
+        textureImage = Image::createTexture(image, vulkanState.allocator,
+                                                 vulkanState.commands, vulkanState.graphicsQueue,
+                                                 vulkanState.device, false);
+        textureImageView = textureImage.createTextureView(vulkanState.device);
+        textureSampler = textureImage.createTextureSampler(
+            vulkanState.physicalDevice, vulkanState.device, VK_FILTER_NEAREST, VK_FILTER_NEAREST);
+
+        inverseImageWidth = 1.0f / textureImage.getWidth();
+        inverseImageHeight = 1.0f / textureImage.getHeight();
+
+        spriteModel = Model<VertexData, uint16_t, InstanceData>::fromVerticesAndIndices(
+            spriteVertices, spriteIndices, maxSprites, vulkanState.allocator, vulkanState.commands,
+            vulkanState.graphicsQueue, vulkanState.device);
+    }
+
+    void begin(VulkanState& vulkanState) { instances.clear(); }
+
+    void add(float x, float y, float depth, float sizeX, float sizeY, float texX, float texY, float texWidth, float texHeight) {
+        instances.push_back(InstanceData{
+            glm::vec3(x, y, depth),
+            glm::vec2(sizeX, sizeY),
+            glm::vec2(texX * inverseImageWidth, texY * inverseImageHeight),
+            glm::vec2(texWidth * inverseImageWidth, texHeight * inverseImageHeight)
+        });
+    }
+
+    void end(VulkanState& vulkanState) {
+        spriteModel.updateInstances(instances, vulkanState.commands, vulkanState.allocator,
+                                    vulkanState.graphicsQueue, vulkanState.device);
+    }
+
+    void draw(const VkCommandBuffer& commandBuffer) {
+        spriteModel.draw(commandBuffer);
+    }
+
+    void cleanup(VulkanState& vulkanState) {
+        vkDestroySampler(vulkanState.device, textureSampler, nullptr);
+        vkDestroyImageView(vulkanState.device, textureImageView, nullptr);
+        textureImage.destroy(vulkanState.allocator);
+
+        spriteModel.destroy(vulkanState.allocator);
+    }
+
+    const VkImageView& getView() { return textureImageView; }
+
+    const VkSampler& getSampler() { return textureSampler; }
+};
 
 class App {
 private:
     Pipeline pipeline;
     RenderPass renderPass;
 
-    Image textureImage;
-    VkImageView textureImageView;
-    VkSampler textureSampler;
-
     UniformBuffer<UniformBufferData> ubo;
-    Model<VertexData, uint16_t, InstanceData> spriteModel;
 
     std::vector<VkClearValue> clearValues;
+
+    SpriteBatch spriteBatch;
 
 public:
     void init(VulkanState& vulkanState, SDL_Window* window, int32_t width, int32_t height) {
@@ -117,24 +183,9 @@ public:
                                         vulkanState.surface);
         vulkanState.commands.createBuffers(vulkanState.device, vulkanState.maxFramesInFlight);
 
-        textureImage = Image::createTextureArray("res/cubesImg.png", vulkanState.allocator,
-                                                 vulkanState.commands, vulkanState.graphicsQueue,
-                                                 vulkanState.device, false, 16, 16, 4);
-        textureImageView = textureImage.createTextureView(vulkanState.device);
-        textureSampler = textureImage.createTextureSampler(
-            vulkanState.physicalDevice, vulkanState.device, VK_FILTER_NEAREST, VK_FILTER_NEAREST);
-
-        spriteModel = Model<VertexData, uint16_t, InstanceData>::fromVerticesAndIndices(
-            spriteVertices, spriteIndices, 3, vulkanState.allocator, vulkanState.commands,
-            vulkanState.graphicsQueue, vulkanState.device);
-        std::vector<InstanceData> instances = {
-            InstanceData{glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(32.0f, 32.0f), 0.0},
-            InstanceData{glm::vec3(32.0f, 0.0f, 0.0f), glm::vec2(32.0f, 32.0f), 1.0},
-            InstanceData{glm::vec3(32.0f, 32.0f, 0.0f), glm::vec2(32.0f, 32.0f), 2.0}};
-        spriteModel.updateInstances(instances, vulkanState.commands, vulkanState.allocator,
-                                    vulkanState.graphicsQueue, vulkanState.device);
-
         ubo.create(vulkanState.maxFramesInFlight, vulkanState.allocator);
+
+        spriteBatch.init(vulkanState, "res/cubesImg.png", 30);
 
         renderPass.create(vulkanState.physicalDevice, vulkanState.device, vulkanState.allocator,
                           vulkanState.swapchain, true, true);
@@ -178,8 +229,8 @@ public:
 
                 VkDescriptorImageInfo imageInfo{};
                 imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                imageInfo.imageView = textureImageView;
-                imageInfo.sampler = textureSampler;
+                imageInfo.imageView = spriteBatch.getView();
+                imageInfo.sampler = spriteBatch.getSampler();
 
                 descriptorWrites.resize(2);
 
@@ -211,7 +262,14 @@ public:
         clearValues[1].depthStencil = {1.0f, 0};
     }
 
-    void update(VulkanState& vulkanState) {}
+    void update(VulkanState& vulkanState) {
+        spriteBatch.begin(vulkanState);
+
+        spriteBatch.add(0, 0, 0, 32, 16, 0, 16, 32, 16);
+        spriteBatch.add(16, 0, -1, 64, 32, 0, 16, 32, 16);
+
+        spriteBatch.end(vulkanState);
+    }
 
     void render(VulkanState& vulkanState, VkCommandBuffer commandBuffer, uint32_t imageIndex,
                 uint32_t currentFrame) {
@@ -237,7 +295,7 @@ public:
         renderPass.begin(imageIndex, commandBuffer, extent, clearValues);
         pipeline.bind(commandBuffer, currentFrame);
 
-        spriteModel.draw(commandBuffer);
+        spriteBatch.draw(commandBuffer);
 
         renderPass.end(commandBuffer);
 
@@ -255,11 +313,7 @@ public:
 
         ubo.destroy(vulkanState.allocator);
 
-        vkDestroySampler(vulkanState.device, textureSampler, nullptr);
-        vkDestroyImageView(vulkanState.device, textureImageView, nullptr);
-        textureImage.destroy(vulkanState.allocator);
-
-        spriteModel.destroy(vulkanState.allocator);
+        spriteBatch.cleanup(vulkanState);
     }
 
     int run() {

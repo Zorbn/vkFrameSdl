@@ -339,3 +339,7 @@ uint32_t Image::calcMipmapLevels(int32_t texWidth, int32_t texHeight) {
 }
 
 void Image::destroy(VmaAllocator allocator) { vmaDestroyImage(allocator, image, allocation); }
+
+uint32_t Image::getWidth() const { return width; }
+
+uint32_t Image::getHeight() const { return height; }

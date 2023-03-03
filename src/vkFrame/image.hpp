@@ -36,6 +36,8 @@ public:
                         uint32_t fullWidth = 0, uint32_t fullHeight = 0);
     void generateMipmaps(Commands& commands, VkQueue graphicsQueue, VkDevice device);
     void destroy(VmaAllocator allocator);
+    uint32_t getWidth() const;
+    uint32_t getHeight() const;
 
 private:
     VkImage image;
