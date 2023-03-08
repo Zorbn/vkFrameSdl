@@ -42,6 +42,8 @@ struct VertexData {
 };
 
 struct InstanceData {
+    glm::vec3 pos;
+
     static VkVertexInputBindingDescription getBindingDescription() {
         VkVertexInputBindingDescription bindingDescription{};
         bindingDescription.binding = 1;
@@ -53,6 +55,12 @@ struct InstanceData {
 
     static std::vector<VkVertexInputAttributeDescription> getAttributeDescriptions() {
         std::vector<VkVertexInputAttributeDescription> attributeDescriptions{};
+        attributeDescriptions.resize(1);
+
+        attributeDescriptions[0].binding = 1;
+        attributeDescriptions[0].location = 3;
+        attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributeDescriptions[0].offset = 0;
 
         return attributeDescriptions;
     }
@@ -199,6 +207,9 @@ private:
     VkImageView colorImageView;
     VkSampler colorSampler;
 
+    Image depthImage;
+    VkImageView depthImageView;
+
     UniformBuffer<UniformBufferData> ubo;
     Model<VertexData, uint16_t, InstanceData> voxelModel;
 
@@ -286,9 +297,9 @@ public:
 
         generateVoxelMesh();
         voxelModel = Model<VertexData, uint16_t, InstanceData>::fromVerticesAndIndices(
-            voxelVertices, voxelIndices, 1, vulkanState.allocator, vulkanState.commands,
+            voxelVertices, voxelIndices, 2, vulkanState.allocator, vulkanState.commands,
             vulkanState.graphicsQueue, vulkanState.device);
-        std::vector<InstanceData> instances = {InstanceData{}};
+        std::vector<InstanceData> instances = {InstanceData{glm::vec3(0.0, 0.0, 0.0)}, InstanceData{glm::vec3(-2.0, 0.0, -5.0)}};
         voxelModel.updateInstances(instances, vulkanState.commands, vulkanState.allocator,
                                    vulkanState.graphicsQueue, vulkanState.device);
 
@@ -308,14 +319,30 @@ public:
                 colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
                 colorAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
+                VkFormat depthFormat = renderPass.findDepthFormat(vulkanState.physicalDevice);
+                VkAttachmentDescription depthAttachment{};
+                depthAttachment.format = depthFormat;
+                depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+                depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
                 VkAttachmentReference colorAttachmentRef{};
                 colorAttachmentRef.attachment = 0;
                 colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+                VkAttachmentReference depthAttachmentRef{};
+                depthAttachmentRef.attachment = 1;
+                depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
                 VkSubpassDescription subpass{};
                 subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
                 subpass.colorAttachmentCount = 1;
                 subpass.pColorAttachments = &colorAttachmentRef;
+                subpass.pDepthStencilAttachment = &depthAttachmentRef;
 
                 std::array<VkSubpassDependency, 2> dependencies;
 
@@ -337,7 +364,7 @@ public:
                 dependencies[1].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
                 dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
-                std::array<VkAttachmentDescription, 1> attachments = {colorAttachment};
+                std::array<VkAttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
 
                 VkRenderPassCreateInfo renderPassInfo{};
                 renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -364,13 +391,23 @@ public:
                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
                 colorImageView =
                     colorImage.createView(VK_IMAGE_ASPECT_COLOR_BIT, vulkanState.device);
+
+                VkFormat depthFormat = renderPass.findDepthFormat(vulkanState.physicalDevice);
+                depthImage = Image(vulkanState.allocator, extent.width, extent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL,
+                       VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+                depthImageView = depthImage.createView(VK_IMAGE_ASPECT_DEPTH_BIT, vulkanState.device);
             },
             [=] {
                 vkDestroyImageView(vulkanState.device, colorImageView, nullptr);
                 colorImage.destroy(vulkanState.allocator);
+
+                vkDestroyImageView(vulkanState.device, depthImageView, nullptr);
+                depthImage.destroy(vulkanState.allocator);
             },
             [&](std::vector<VkImageView>& attachments, VkImageView imageView) {
                 attachments.push_back(colorImageView);
+                attachments.push_back(depthImageView);
             });
 
         finalRenderPass.create(vulkanState.physicalDevice, vulkanState.device,
